@@ -3,10 +3,11 @@ import yfinance as yf
 import pandas as pd
 from dotenv import load_dotenv
 import os
-from src.Agents.Earnings_Calls_Sec_Filings_Agents.earnings_sec_analysis_agents import EarningsSecAnalysisAgents
-from crewai import Crew
 import sys
 import requests
+import json
+from src.Agents.Earnings_Calls_Sec_Filings_Agents.earnings_sec_analysis_agents import EarningsSecAnalysisAgents
+from crewai import Crew
 
 # Load environment variables
 load_dotenv()
@@ -54,9 +55,9 @@ class CrewAIEarningsCallsStrategy(bt.Strategy):
                 self.earnings_call_dates = []
                 self.earnings_data = None
                 return
-            # Extract dates
-            event_dates = [event['date'] for event in events]
-            self.earnings_call_dates = pd.to_datetime(event_dates).date
+            # Extract dates using 'conference_date' and parse them
+            event_dates = [pd.to_datetime(event['conference_date']).date() for event in events]
+            self.earnings_call_dates = event_dates
             self.earnings_data = events
         else:
             print("Error fetching earnings calls:", response.status_code)
@@ -84,12 +85,25 @@ class CrewAIEarningsCallsStrategy(bt.Strategy):
             verbose=True
         )
         self.crew_output = crew.kickoff()
+        # Debugging statements
+        print("Crew Output Type:", type(self.crew_output))
+        print("Crew Output:", self.crew_output)
 
     def get_recommendation_from_crew_output(self):
-        # Simple keyword-based sentiment analysis
         analysis_text = ''
-        for key in self.crew_output:
-            analysis_text += self.crew_output[key]
+        for task_id, output in self.crew_output.items():
+            print(f"Task ID: {task_id}, Output Type: {type(output)}")  # Debugging
+            print(f"Output: {output}")  # Debugging
+            if isinstance(output, dict):
+                # If the output is a dict, extract the relevant content
+                analysis_text += output.get('result', '')  # Adjust the key as per your structure
+            elif isinstance(output, str):
+                analysis_text += output
+            else:
+                # Handle other data types if necessary
+                analysis_text += str(output)
+
+        print(f"Accumulated Analysis Text: {analysis_text}")  # Debugging
 
         analysis_text = analysis_text.lower()
 
@@ -135,8 +149,6 @@ class CrewAIEarningsCallsStrategy(bt.Strategy):
     def notify_trade(self, trade):
         if trade.isclosed:
             self.log(f'OPERATION PROFIT, GROSS {trade.pnl:.2f}, NET {trade.pnlcomm:.2f}')
-
-
 
 def run_strategy(strategy_class, strategy_name, data_df, company=None, exchange=None):
     cerebro = bt.Cerebro()
